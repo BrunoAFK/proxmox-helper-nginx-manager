@@ -239,7 +239,3 @@ For issues and questions:
 - Check logs: `/var/log/npm-manager.log`
 - Run diagnostics: `./helper.sh doctor`
 - Open an issue on GitHub
-
----
-
-**Made with ❤️ for the Proxmox community by [Bruno Pavelja](https://pavelja.com)**
