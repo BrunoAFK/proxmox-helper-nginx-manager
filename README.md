@@ -10,9 +10,11 @@ A powerful bash script for installing, updating, and managing Nginx Proxy Manage
 
 - 🚀 Fresh installation or update to any version
 - 🔄 Automatic migration from old installations
-- 💾 Smart backup and rollback system
+- 💾 Smart backup and rollback system (with metadata tracking)
 - 🔍 Installation type auto-detection
 - 🛡️ Safe updates with health checks
+- 🧰 Interactive rollback handling for dependency mismatches
+- 🛑 Web server takeover protection (requires explicit override)
 - 📊 Built-in diagnostics tool
 
 ## 🎯 Quick Start
@@ -31,6 +33,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/BrunoAFK/proxmox-helper-ngin
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/BrunoAFK/proxmox-helper-nginx-manager/main/helper.sh) migrate
 ```
+
+### ⚠️ Dedicated Server Warning
+By default, the script will abort if it detects an existing web server configuration to avoid destructive overwrites.
+If you're installing NPM on a dedicated host and want the script to take over nginx/OpenResty configuration, use:
 
 ## 📋 Commands
 
@@ -58,6 +64,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/BrunoAFK/proxmox-helper-ngin
 | `--keep-data` | Keep current data on rollback |
 | `--target <ver>` | Install specific version (e.g., `2.13.5` or `latest`) |
 | `--node <major>` | Specify Node.js major version (default: 22) |
+| `--takeover-nginx` | Allow replacing existing nginx/apache configuration (dedicated NPM hosts only) |
 | `--debug` | Enable verbose logging |
 
 ## 📚 Usage Examples
@@ -152,9 +159,11 @@ All data in `/data` is preserved during migration.
 
 ## 🛡️ Safety Features
 
-- **Automatic backups** before updates
+- **Automatic backups** before updates (now includes dependency metadata)
 - **Health checks** after deployment
 - **Automatic rollback** on failures
+- **Interactive rollback** when Node/Yarn mismatch is detected
+- **Web server takeover protection** to prevent accidental nginx/apache replacement
 - **Lock file** prevents concurrent runs
 - **Full logging** to `/var/log/npm-manager.log`
 

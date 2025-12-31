@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Feature ideas for future releases
 
-## [3.0.0] - 2026-01-01
+## [3.0.0] - 2025-12-30
 
 ### Added
 - Initial release
@@ -32,5 +32,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved file permissions (755 instead of 777)
 - Proper ownership settings
 
-[Unreleased]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.0.0...HEAD
+## [3.1.0] - 2025-12-31
+
+### Added
+- Backup metadata file: `/opt/npm-backups/previous/.metadata.json` storing:
+  - NPM version, Node.js version, Yarn version
+  - OpenResty and Certbot versions
+  - OS info, timestamp, installation type
+- Web server takeover protection to prevent accidental overwriting of existing nginx/apache setups
+- `--takeover-nginx` flag to explicitly allow replacing existing web server configs on dedicated NPM hosts
+- Interactive rollback prompt on dependency mismatch:
+  - Manual (continue with guidance)
+  - Automatic (attempt dependency rollback)
+  - Cancel (abort safely)
+
+### Changed
+- Rollback now checks backed dependency versions and surfaces mismatches clearly
+- Deployment is safer by default when a web server is detected
+
+### Fixed
+- Reduced cases where rollback appears successful but dependency drift remains unnoticed
+
+### Security
+- Safer-by-default behavior to avoid destructive nginx/apache overwrites without explicit consent
+
+
+[Unreleased]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/releases/tag/v3.0.0

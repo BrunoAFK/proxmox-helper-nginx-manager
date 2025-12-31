@@ -10,7 +10,7 @@ umask 022
 #
 # Author: Enhanced community version
 
-VERSION="3.0.0"
+VERSION="3.1.0"
 REPO="NginxProxyManager/nginx-proxy-manager"
 
 # ============================================================================
@@ -894,7 +894,7 @@ rollback_version() {
     warn "  3) apt-get install -y nodejs"
     warn "  4) npm install -g yarn@${backed_yarn_ver}"
   fi
-  
+
   systemctl daemon-reload 2>/dev/null || true
   systemctl start "${SERVICE_NGINX}" 2>/dev/null || true
   sleep 2
