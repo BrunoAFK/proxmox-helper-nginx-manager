@@ -792,7 +792,7 @@ rollback_version() {
   fi
   
   return 0
-} ]]; then
+}; then
     if [[ -d "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" ]]; then
       rm -rf "${DATA_DIR}"
       cp -a "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" "${DATA_DIR}"
