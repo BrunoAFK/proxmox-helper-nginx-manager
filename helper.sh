@@ -56,7 +56,9 @@ NO_BACKUP=false
 KEEP_DATA_ON_ROLLBACK=false
 DEBUG=false
 MIGRATE_MODE=false
-TAKEOVER_NGINX=false  # NEW: Explicit nginx takeover flag
+TAKEOVER_NGINX=false  
+AUTO_DEPS_ON_ROLLBACK=false
+MANUAL_DEPS_ON_ROLLBACK=false
 TARGET_VERSION="${NPM_VERSION_DEFAULT}"
 NODE_MAJOR="${NODE_MAJOR_DEFAULT}"
 YARN_VERSION="${YARN_VERSION_DEFAULT}"
@@ -684,6 +686,121 @@ EOF
   log "Metadata saved: Node $(node -v 2>/dev/null || echo unknown), Yarn $(yarn -v 2>/dev/null || echo unknown)"
 }
 
+prompt_dependency_rollback_choice() {
+  local backed_node_ver="$1"
+  local backed_yarn_ver="$2"
+  local current_node_ver="$3"
+
+  warn "Node.js version mismatch detected!"
+  warn "Backup was created with: ${backed_node_ver}"
+  warn "Current version: ${current_node_ver}"
+  warn ""
+
+  # If no TTY, default to manual (continue without changing deps)
+  if [[ ! -t 0 ]]; then
+    warn "Non-interactive session: defaulting to MANUAL dependency rollback."
+    MANUAL_DEPS_ON_ROLLBACK=true
+    return 0
+  fi
+
+  echo ""
+  echo "Dependency rollback options:"
+  echo "  [A] Automatic: downgrade Node.js and reinstall Yarn to match backup metadata"
+  echo "  [M] Manual: show instructions, continue rollback without changing Node/Yarn"
+  echo "  [C] Cancel: abort rollback (no changes applied)"
+  echo ""
+
+  while true; do
+    read -p "Choose (A/M/C): " -r choice
+    case "${choice}" in
+      A|a)
+        AUTO_DEPS_ON_ROLLBACK=true
+        return 0
+        ;;
+      M|m)
+        MANUAL_DEPS_ON_ROLLBACK=true
+        return 0
+        ;;
+      C|c)
+        log "Rollback cancelled by user (no changes applied)."
+        exit 0
+        ;;
+      *)
+        echo "Invalid choice. Enter A, M, or C."
+        ;;
+    esac
+  done
+}
+
+rollback_dependencies_auto() {
+  local backed_node_ver="$1"   # example: v16.20.2
+  local backed_yarn_ver="$2"   # example: 1.22.22
+
+  if [[ -z "${backed_node_ver}" || "${backed_node_ver}" == "unknown" ]]; then
+    warn "Backup metadata has no Node.js version. Skipping automatic dependency rollback."
+    return 0
+  fi
+
+  # Parse major from vX.Y.Z
+  local backed_node_major
+  backed_node_major="$(echo "${backed_node_ver}" | tr -d '[:space:]' | sed 's/^v//' | cut -d'.' -f1)"
+  if [[ -z "${backed_node_major}" || ! "${backed_node_major}" =~ ^[0-9]+$ ]]; then
+    warn "Could not parse Node.js major from '${backed_node_ver}'. Skipping automatic dependency rollback."
+    return 0
+  fi
+
+  log "Automatic dependency rollback selected."
+  log "Rolling back Node.js to major v${backed_node_major} (from backup ${backed_node_ver})..."
+
+  case "${OS_ID}" in
+    debian|ubuntu)
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+
+      # Remove current Node.js
+      apt-get purge -y -qq nodejs npm >/dev/null 2>&1 || true
+      apt-get autoremove -y -qq >/dev/null 2>&1 || true
+
+      # Install requested Node major via NodeSource
+      apt-get install -y -qq ca-certificates curl gnupg >/dev/null
+      rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true
+      rm -f /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
+
+      if ! curl -fsSL "https://deb.nodesource.com/setup_${backed_node_major}.x" | bash - >/dev/null 2>&1; then
+        die "NodeSource setup failed for Node.js ${backed_node_major}.x"
+      fi
+
+      apt-get install -y -qq nodejs >/dev/null || die "Failed to install Node.js ${backed_node_major}.x"
+
+      log "Node.js now: $(node -v 2>/dev/null || echo unknown)"
+      ;;
+    *)
+      warn "Unsupported OS for automatic Node.js rollback: ${OS_ID}"
+      return 1
+      ;;
+  esac
+
+  # Reinstall Yarn to backed version if available
+  if [[ -n "${backed_yarn_ver}" && "${backed_yarn_ver}" != "unknown" ]]; then
+    log "Reinstalling Yarn ${backed_yarn_ver} to match backup..."
+    if command -v corepack >/dev/null 2>&1; then
+      corepack enable >/dev/null 2>&1 || true
+      corepack prepare "yarn@${backed_yarn_ver}" --activate >/dev/null 2>&1 || true
+    fi
+    # Ensure yarn exists at requested version
+    if ! command -v yarn >/dev/null 2>&1 || [[ "$(yarn -v 2>/dev/null || echo "")" != "${backed_yarn_ver}" ]]; then
+      npm install -g "yarn@${backed_yarn_ver}" >/dev/null || die "Failed to install yarn@${backed_yarn_ver}"
+    fi
+    log "Yarn now: $(yarn -v 2>/dev/null || echo unknown)"
+  else
+    warn "Backup metadata has no Yarn version. Skipping Yarn reinstall."
+  fi
+
+  log "Automatic dependency rollback complete."
+  return 0
+}
+
+
 rollback_version() {
   if [[ ! -d "${BACKUP_DIR}/previous" ]]; then
     die "No backup found to rollback to! (${BACKUP_DIR}/previous does not exist)"
@@ -697,11 +814,20 @@ rollback_version() {
   local backed_node_ver=""
   local backed_yarn_ver=""
 
+  # Decide dependency rollback strategy BEFORE making changes
   if [[ -f "${metadata_file}" ]]; then
     log "Found backup metadata, checking dependency versions..."
     backed_node_ver=$(grep '"node_version"' "${metadata_file}" | cut -d'"' -f4 || echo "")
     backed_yarn_ver=$(grep '"yarn_version"' "${metadata_file}" | cut -d'"' -f4 || echo "")
     debug "Backup was created with Node ${backed_node_ver}, Yarn ${backed_yarn_ver}"
+
+    if [[ -n "${backed_node_ver}" && "${backed_node_ver}" != "unknown" ]]; then
+      local current_node_ver
+      current_node_ver=$(node -v 2>/dev/null || echo "unknown")
+      if [[ "${current_node_ver}" != "unknown" && "${backed_node_ver}" != "${current_node_ver}" ]]; then
+        prompt_dependency_rollback_choice "${backed_node_ver}" "${backed_yarn_ver}" "${current_node_ver}"
+      fi
+    fi
   fi
 
   log "Rolling back to previous version (${prev})..."
@@ -756,35 +882,19 @@ rollback_version() {
     warn "Keeping current ${DATA_DIR} (--keep-data specified)"
   fi
 
-  # Check if we need to rollback Node.js version
-  if [[ -n "${backed_node_ver}" ]] && [[ "${backed_node_ver}" != "unknown" ]]; then
-    local current_node_ver
-    current_node_ver=$(node -v 2>/dev/null || echo "unknown")
-
-    if [[ "${backed_node_ver}" != "${current_node_ver}" ]]; then
-      warn "Node.js version mismatch detected!"
-      warn "Backup was created with: ${backed_node_ver}"
-      warn "Current version: ${current_node_ver}"
-      warn ""
-      warn "NOTE: This rollback restores application files but does NOT downgrade Node.js."
-      warn "If you experience issues, you may need to manually reinstall Node.js ${backed_node_ver}"
-      warn ""
-      warn "To reinstall specific Node.js version:"
-      warn "  1. Remove current: apt-get purge -y nodejs npm"
-      warn "  2. Clear cache: rm -rf /usr/local/bin/node /usr/local/bin/npm ~/.npm"
-      warn "  3. Reinstall: Use NodeSource or nvm for specific version"
-      warn ""
-      if [[ -t 0 ]]; then
-        read -p "Continue rollback anyway? (yes/no): " -r
-        if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
-          die "Rollback cancelled by user"
-        fi
-      else
-        warn "Non-interactive session: continuing rollback without prompt."
-      fi
-    fi
+  # Apply dependency rollback choice after files are restored, before services start
+  if [[ "${AUTO_DEPS_ON_ROLLBACK}" == "true" ]]; then
+    rollback_dependencies_auto "${backed_node_ver}" "${backed_yarn_ver}" || \
+      warn "Automatic dependency rollback failed. Continuing rollback anyway."
+  elif [[ "${MANUAL_DEPS_ON_ROLLBACK}" == "true" ]]; then
+    warn "Manual dependency rollback selected. Continuing rollback without changing Node/Yarn."
+    warn "If you want to match backup Node version (${backed_node_ver}), do it manually, then restart services:"
+    warn "  1) apt-get purge -y nodejs npm"
+    warn "  2) curl -fsSL https://deb.nodesource.com/setup_${backed_node_ver#v%%.*}.x | bash -"
+    warn "  3) apt-get install -y nodejs"
+    warn "  4) npm install -g yarn@${backed_yarn_ver}"
   fi
-
+  
   systemctl daemon-reload 2>/dev/null || true
   systemctl start "${SERVICE_NGINX}" 2>/dev/null || true
   sleep 2
