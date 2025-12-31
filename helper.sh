@@ -179,6 +179,7 @@ show_help() {
   echo -e "  ${YELLOW}--force${NC}         Force reinstall even if up-to-date"
   echo -e "  ${YELLOW}--no-backup${NC}     Skip backup (faster, no rollback possible)"
   echo -e "  ${YELLOW}--keep-data${NC}     On rollback, keep current /data"
+  echo -e "  ${YELLOW}--takeover-nginx${NC} Replace existing nginx/apache configuration (DANGEROUS)"
   echo -e "  ${YELLOW}--target <ver>${NC}  Install specific version (e.g., 2.13.5 or 'latest')"
   echo -e "  ${YELLOW}--node <major>${NC}  Node.js major version (default: ${NODE_MAJOR_DEFAULT})"
   echo -e "  ${YELLOW}--debug${NC}         Verbose logging for troubleshooting"
@@ -773,9 +774,13 @@ rollback_version() {
       warn "  2. Clear cache: rm -rf /usr/local/bin/node /usr/local/bin/npm ~/.npm"
       warn "  3. Reinstall: Use NodeSource or nvm for specific version"
       warn ""
-      read -p "Continue rollback anyway? (yes/no): " -r
-      if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
-        die "Rollback cancelled by user"
+      if [[ -t 0 ]]; then
+        read -p "Continue rollback anyway? (yes/no): " -r
+        if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+          die "Rollback cancelled by user"
+        fi
+      else
+        warn "Non-interactive session: continuing rollback without prompt."
       fi
     fi
   fi
@@ -784,6 +789,12 @@ rollback_version() {
   systemctl start "${SERVICE_NGINX}" 2>/dev/null || true
   sleep 2
   systemctl start "${SERVICE_APP}" 2>/dev/null || true
+
+  if healthcheck; then
+    log "Rollback health check passed"
+  else
+    warn "Rollback completed but health check failed"
+  fi
 
   log "Rollback complete! Restored to version ${prev}"
 
@@ -1459,9 +1470,9 @@ perform_install_or_update() {
     
     log "Proceeding with update..."
     
-    install_dependencies
-    
     backup_current_version
+
+    install_dependencies
     
     local tree
     tree="$(download_release_tree "${target_ver}")"
