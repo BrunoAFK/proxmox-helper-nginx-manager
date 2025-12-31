@@ -56,6 +56,7 @@ NO_BACKUP=false
 KEEP_DATA_ON_ROLLBACK=false
 DEBUG=false
 MIGRATE_MODE=false
+TAKEOVER_NGINX=false  # NEW: Explicit nginx takeover flag
 TARGET_VERSION="${NPM_VERSION_DEFAULT}"
 NODE_MAJOR="${NODE_MAJOR_DEFAULT}"
 YARN_VERSION="${YARN_VERSION_DEFAULT}"
@@ -617,6 +618,21 @@ backup_current_version() {
   cur="$(get_current_version)"
   log "Backing up current version (${cur:-unknown})..."
 
+  # Create metadata file with all important versions
+  cat > "${BACKUP_DIR}/previous/.metadata.json" <<EOF
+{
+  "npm_version": "${cur:-unknown}",
+  "node_version": "$(node -v 2>/dev/null || echo unknown)",
+  "yarn_version": "$(yarn -v 2>/dev/null || echo unknown)",
+  "openresty_version": "$(openresty -v 2>&1 | head -n1 || echo unknown)",
+  "certbot_version": "$(certbot --version 2>&1 | head -n1 || echo unknown)",
+  "backup_timestamp": "$(date -Iseconds)",
+  "os_id": "${OS_ID}",
+  "os_version": "${OS_VERSION}",
+  "install_type": "${INSTALL_TYPE}"
+}
+EOF
+
   # Backup application runtime
   if [[ -d "${APP_DIR}" ]]; then
     mkdir -p "${BACKUP_DIR}/previous${APP_DIR}"
@@ -659,11 +675,12 @@ backup_current_version() {
     cp -a "${DATA_DIR}" "${BACKUP_DIR}/previous/data-parent/" 2>/dev/null || true
   fi
 
-  # Save version info
+  # Save version info (legacy support)
   echo "${cur:-unknown}" > "${BACKUP_DIR}/previous/.version"
   echo "${INSTALL_TYPE}" > "${BACKUP_DIR}/previous/.install_type"
   
   log "Backup complete (stored in ${BACKUP_DIR}/previous)"
+  log "Metadata saved: Node $(node -v 2>/dev/null || echo unknown), Yarn $(yarn -v 2>/dev/null || echo unknown)"
 }
 
 rollback_version() {
@@ -673,6 +690,19 @@ rollback_version() {
 
   local prev
   prev="$(cat "${BACKUP_DIR}/previous/.version" 2>/dev/null || echo unknown)"
+  
+  # Read metadata if available
+  local metadata_file="${BACKUP_DIR}/previous/.metadata.json"
+  local backed_node_ver=""
+  local backed_yarn_ver=""
+  
+  if [[ -f "${metadata_file}" ]]; then
+    log "Found backup metadata, checking dependency versions..."
+    backed_node_ver=$(grep '"node_version"' "${metadata_file}" | cut -d'"' -f4 || echo "")
+    backed_yarn_ver=$(grep '"yarn_version"' "${metadata_file}" | cut -d'"' -f4 || echo "")
+    debug "Backup was created with Node ${backed_node_ver}, Yarn ${backed_yarn_ver}"
+  fi
+  
   log "Rolling back to previous version (${prev})..."
 
   systemctl stop "${SERVICE_APP}" 2>/dev/null || true
@@ -717,6 +747,52 @@ rollback_version() {
 
   # Restore data directory (unless --keep-data specified)
   if [[ "${KEEP_DATA_ON_ROLLBACK}" != "true" ]]; then
+    if [[ -d "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" ]]; then
+      rm -rf "${DATA_DIR}"
+      cp -a "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" "${DATA_DIR}"
+    fi
+  else
+    warn "Keeping current ${DATA_DIR} (--keep-data specified)"
+  fi
+  
+  # Check if we need to rollback Node.js version
+  if [[ -n "${backed_node_ver}" ]] && [[ "${backed_node_ver}" != "unknown" ]]; then
+    local current_node_ver
+    current_node_ver=$(node -v 2>/dev/null || echo "unknown")
+    
+    if [[ "${backed_node_ver}" != "${current_node_ver}" ]]; then
+      warn "Node.js version mismatch detected!"
+      warn "Backup was created with: ${backed_node_ver}"
+      warn "Current version: ${current_node_ver}"
+      warn ""
+      warn "NOTE: This rollback restores application files but does NOT downgrade Node.js."
+      warn "If you experience issues, you may need to manually reinstall Node.js ${backed_node_ver}"
+      warn ""
+      warn "To reinstall specific Node.js version:"
+      warn "  1. Remove current: apt-get purge -y nodejs npm"
+      warn "  2. Clear cache: rm -rf /usr/local/bin/node /usr/local/bin/npm ~/.npm"
+      warn "  3. Reinstall: Use NodeSource or nvm for specific version"
+      warn ""
+      read -p "Continue rollback anyway? (yes/no): " -r
+      if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+        die "Rollback cancelled by user"
+      fi
+    fi
+  fi
+
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl start "${SERVICE_NGINX}" 2>/dev/null || true
+  sleep 2
+  systemctl start "${SERVICE_APP}" 2>/dev/null || true
+
+  log "Rollback complete! Restored to version ${prev}"
+  
+  if [[ -n "${backed_node_ver}" ]] && [[ "${backed_node_ver}" != "$(node -v 2>/dev/null)" ]]; then
+    warn "Remember: Node.js version was not rolled back automatically"
+  fi
+  
+  return 0
+} ]]; then
     if [[ -d "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" ]]; then
       rm -rf "${DATA_DIR}"
       cp -a "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" "${DATA_DIR}"
@@ -827,6 +903,51 @@ deploy_environment_files() {
   local tree="$1"
 
   log "Deploying environment files and configuration..."
+  
+  # Check if nginx/web services already exist
+  if [[ "${TAKEOVER_NGINX}" != "true" ]]; then
+    local nginx_exists=false
+    
+    # Check for existing nginx installations
+    if [[ -d /etc/nginx ]] && [[ ! -L /etc/nginx ]]; then
+      if [[ -f /etc/nginx/nginx.conf ]] && ! grep -q "openresty" /etc/nginx/nginx.conf 2>/dev/null; then
+        nginx_exists=true
+      fi
+    fi
+    
+    # Check for apache
+    if systemctl is-active --quiet apache2 2>/dev/null; then
+      nginx_exists=true
+    fi
+    
+    # Check for other nginx
+    if systemctl is-active --quiet nginx 2>/dev/null && ! systemctl is-active --quiet openresty 2>/dev/null; then
+      nginx_exists=true
+    fi
+    
+    if [[ "${nginx_exists}" == "true" ]]; then
+      warn "════════════════════════════════════════════════════════════"
+      warn "  EXISTING WEB SERVER DETECTED"
+      warn "════════════════════════════════════════════════════════════"
+      warn ""
+      warn "This script will REPLACE your existing nginx/apache configuration!"
+      warn "This includes:"
+      warn "  - /etc/nginx (will be deleted and replaced)"
+      warn "  - /var/www/html (will be deleted)"
+      warn "  - Any existing virtual hosts or configurations"
+      warn ""
+      warn "This is designed for DEDICATED NPM servers only."
+      warn ""
+      warn "Options:"
+      warn "  1. Cancel now and backup your configs manually"
+      warn "  2. Run with --takeover-nginx flag to proceed anyway"
+      warn "  3. Use a fresh/dedicated server for NPM"
+      warn ""
+      die "Existing web server detected. Aborting for safety. Use --takeover-nginx to override."
+    fi
+  else
+    warn "NGINX TAKEOVER MODE: Will replace existing web server configuration"
+  fi
 
   # Create symlinks
   ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
@@ -1412,6 +1533,7 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE_UPDATE=true; shift ;;
     --no-backup) NO_BACKUP=true; shift ;;
     --keep-data) KEEP_DATA_ON_ROLLBACK=true; shift ;;
+    --takeover-nginx) TAKEOVER_NGINX=true; shift ;;
     --debug) DEBUG=true; shift ;;
     --target) 
       TARGET_VERSION="${2:-}"
