@@ -690,19 +690,19 @@ rollback_version() {
 
   local prev
   prev="$(cat "${BACKUP_DIR}/previous/.version" 2>/dev/null || echo unknown)"
-  
+
   # Read metadata if available
   local metadata_file="${BACKUP_DIR}/previous/.metadata.json"
   local backed_node_ver=""
   local backed_yarn_ver=""
-  
+
   if [[ -f "${metadata_file}" ]]; then
     log "Found backup metadata, checking dependency versions..."
     backed_node_ver=$(grep '"node_version"' "${metadata_file}" | cut -d'"' -f4 || echo "")
     backed_yarn_ver=$(grep '"yarn_version"' "${metadata_file}" | cut -d'"' -f4 || echo "")
     debug "Backup was created with Node ${backed_node_ver}, Yarn ${backed_yarn_ver}"
   fi
-  
+
   log "Rolling back to previous version (${prev})..."
 
   systemctl stop "${SERVICE_APP}" 2>/dev/null || true
@@ -714,7 +714,7 @@ rollback_version() {
     mkdir -p "$(dirname "${APP_DIR}")"
     cp -a "${BACKUP_DIR}/previous${APP_DIR}" "${APP_DIR}"
   fi
-  
+
   # Restore /opt/nginxproxymanager if backed up
   if [[ -d "${BACKUP_DIR}/previous/opt/nginxproxymanager" ]]; then
     rm -rf "/opt/nginxproxymanager"
@@ -754,12 +754,12 @@ rollback_version() {
   else
     warn "Keeping current ${DATA_DIR} (--keep-data specified)"
   fi
-  
+
   # Check if we need to rollback Node.js version
   if [[ -n "${backed_node_ver}" ]] && [[ "${backed_node_ver}" != "unknown" ]]; then
     local current_node_ver
     current_node_ver=$(node -v 2>/dev/null || echo "unknown")
-    
+
     if [[ "${backed_node_ver}" != "${current_node_ver}" ]]; then
       warn "Node.js version mismatch detected!"
       warn "Backup was created with: ${backed_node_ver}"
@@ -786,29 +786,14 @@ rollback_version() {
   systemctl start "${SERVICE_APP}" 2>/dev/null || true
 
   log "Rollback complete! Restored to version ${prev}"
-  
+
   if [[ -n "${backed_node_ver}" ]] && [[ "${backed_node_ver}" != "$(node -v 2>/dev/null)" ]]; then
     warn "Remember: Node.js version was not rolled back automatically"
   fi
-  
-  return 0
-}; then
-    if [[ -d "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" ]]; then
-      rm -rf "${DATA_DIR}"
-      cp -a "${BACKUP_DIR}/previous/data-parent${DATA_DIR}" "${DATA_DIR}"
-    fi
-  else
-    warn "Keeping current ${DATA_DIR} (--keep-data specified)"
-  fi
 
-  systemctl daemon-reload 2>/dev/null || true
-  systemctl start "${SERVICE_NGINX}" 2>/dev/null || true
-  sleep 2
-  systemctl start "${SERVICE_APP}" 2>/dev/null || true
-
-  log "Rollback complete! Restored to version ${prev}"
   return 0
 }
+
 
 # -----------------------------
 # Download/build/deploy
