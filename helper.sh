@@ -417,8 +417,8 @@ get_latest_tag_version() {
       "https://api.github.com/repos/${REPO}/tags${cache_bust}")" || return 1
   fi
 
-  # Pick the first semver-ish tag in the list
-  tag="$(printf '%s' "$json" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\(v\{0,1\}[0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' | head -n1)"
+  # Pick the first semver-ish tag in the list (one match per line)
+  tag="$(printf '%s' "$json" | tr ',' '\n' | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\(v\{0,1\}[0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' | head -n1)"
   [[ -n "$tag" ]] || return 1
   printf "%s\n" "${tag#v}"
 }
