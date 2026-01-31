@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Default target version now resolves to `latest` so updates/checks always use the newest release
+- Safer web server detection: avoid false positives when `/etc/nginx` belongs to NPM/OpenResty
 
 ## [3.1.1] - 2026-01-31
 

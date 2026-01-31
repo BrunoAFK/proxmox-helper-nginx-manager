@@ -1054,24 +1054,38 @@ deploy_environment_files() {
   # Check if nginx/web services already exist
   if [[ "${TAKEOVER_NGINX}" != "true" ]]; then
     local nginx_exists=false
-    
-    # Check for existing nginx installations
-    if [[ -d /etc/nginx ]] && [[ ! -L /etc/nginx ]]; then
-      if [[ -f /etc/nginx/nginx.conf ]] && ! grep -q "openresty" /etc/nginx/nginx.conf 2>/dev/null; then
-        nginx_exists=true
+    local npm_managed_nginx=false
+    local openresty_present=false
+
+    if command -v openresty >/dev/null 2>&1 || [[ -x /usr/local/openresty/nginx/sbin/nginx ]]; then
+      openresty_present=true
+    fi
+
+    # Check for nginx config that looks like NPM/OpenResty
+    if [[ -f /etc/nginx/nginx.conf ]]; then
+      if grep -qE "user[[:space:]]+npm;|/data/nginx|#daemon off" /etc/nginx/nginx.conf 2>/dev/null; then
+        npm_managed_nginx=true
+      fi
+      if grep -q "openresty" /etc/nginx/nginx.conf 2>/dev/null; then
+        npm_managed_nginx=true
       fi
     fi
-    
+
     # Check for apache
     if systemctl is-active --quiet apache2 2>/dev/null; then
       nginx_exists=true
     fi
-    
-    # Check for other nginx
+
+    # Check for other nginx (active nginx without openresty)
     if systemctl is-active --quiet nginx 2>/dev/null && ! systemctl is-active --quiet openresty 2>/dev/null; then
       nginx_exists=true
     fi
-    
+
+    # Fall back to directory heuristic only if it doesn't look like NPM/OpenResty
+    if [[ -d /etc/nginx ]] && [[ ! -L /etc/nginx ]] && [[ "${npm_managed_nginx}" != "true" ]] && [[ "${openresty_present}" != "true" ]]; then
+      nginx_exists=true
+    fi
+
     if [[ "${nginx_exists}" == "true" ]]; then
       warn "════════════════════════════════════════════════════════════"
       warn "  EXISTING WEB SERVER DETECTED"
