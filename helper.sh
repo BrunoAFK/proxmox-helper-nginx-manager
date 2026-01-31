@@ -396,26 +396,67 @@ get_current_version() {
   echo ""
 }
 
-get_latest_version() {
+get_latest_tag_version() {
   local json tag
-  
+  local cache_bust="?t=$(date +%s)"
+
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     json="$(curl -fsSL --retry 3 --retry-delay 1 \
       -H "Authorization: Bearer ${GITHUB_TOKEN}" \
       -H "Accept: application/vnd.github+json" \
       -H "User-Agent: npm-manager" \
-      "https://api.github.com/repos/${REPO}/releases/latest")" || die "Could not fetch latest release from GitHub API."
+      -H "Cache-Control: no-cache" \
+      -H "Pragma: no-cache" \
+      "https://api.github.com/repos/${REPO}/tags${cache_bust}")" || return 1
   else
     json="$(curl -fsSL --retry 3 --retry-delay 1 \
       -H "Accept: application/vnd.github+json" \
       -H "User-Agent: npm-manager" \
-      "https://api.github.com/repos/${REPO}/releases/latest")" || die "Could not fetch latest release from GitHub API."
+      -H "Cache-Control: no-cache" \
+      -H "Pragma: no-cache" \
+      "https://api.github.com/repos/${REPO}/tags${cache_bust}")" || return 1
+  fi
+
+  # Pick the first semver-ish tag in the list
+  tag="$(printf '%s' "$json" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\(v\{0,1\}[0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/p' | head -n1)"
+  [[ -n "$tag" ]] || return 1
+  printf "%s\n" "${tag#v}"
+}
+
+get_latest_version() {
+  local json tag latest_release latest_tag
+  local cache_bust="?t=$(date +%s)"
+
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    json="$(curl -fsSL --retry 3 --retry-delay 1 \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      -H "User-Agent: npm-manager" \
+      -H "Cache-Control: no-cache" \
+      -H "Pragma: no-cache" \
+      "https://api.github.com/repos/${REPO}/releases/latest${cache_bust}")" || die "Could not fetch latest release from GitHub API."
+  else
+    json="$(curl -fsSL --retry 3 --retry-delay 1 \
+      -H "Accept: application/vnd.github+json" \
+      -H "User-Agent: npm-manager" \
+      -H "Cache-Control: no-cache" \
+      -H "Pragma: no-cache" \
+      "https://api.github.com/repos/${REPO}/releases/latest${cache_bust}")" || die "Could not fetch latest release from GitHub API."
   fi
 
   tag="$(printf '%s' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
   [[ -n "$tag" ]] || die "Could not parse tag_name from GitHub JSON."
+  latest_release="${tag#v}"
 
-  echo "${tag#v}"
+  # Fallback to tags if releases/latest appears stale
+  latest_tag="$(get_latest_tag_version || echo "")"
+  if [[ -n "${latest_tag}" ]] && ver_ge "${latest_tag}" "${latest_release}" && [[ "${latest_tag}" != "${latest_release}" ]]; then
+    warn "GitHub releases/latest returned ${latest_release}, but latest tag is ${latest_tag}. Using latest tag."
+    printf "%s\n" "${latest_tag}"
+    return 0
+  fi
+
+  printf "%s\n" "${latest_release}"
 }
 
 ver_ge() {
