@@ -10,7 +10,7 @@ umask 022
 #
 # Author: Enhanced community version
 
-VERSION="3.1.2"
+VERSION="3.1.3"
 REPO="NginxProxyManager/nginx-proxy-manager"
 
 # ============================================================================
@@ -1177,6 +1177,20 @@ deploy_environment_files() {
   if [[ -f /etc/resolv.conf ]]; then
     echo resolver "$(awk 'BEGIN{ORS=" "} $1=="nameserver" {print ($2 ~ ":")? "["$2"]": $2}' /etc/resolv.conf);" \
       > /etc/nginx/conf.d/include/resolvers.conf
+  fi
+
+  # Ensure log.conf exists (some upstream releases omit it)
+  if [[ ! -f /etc/nginx/conf.d/include/log.conf ]]; then
+    if [[ -f "${BACKUP_DIR}/previous/etc/nginx/conf.d/include/log.conf" ]]; then
+      cp -a "${BACKUP_DIR}/previous/etc/nginx/conf.d/include/log.conf" /etc/nginx/conf.d/include/log.conf
+    else
+      cat <<'EOF' >/etc/nginx/conf.d/include/log.conf
+log_format proxy '$remote_addr - $remote_user [$time_local] "$request" '
+  '$status $body_bytes_sent "$http_referer" '
+  '"$http_user_agent" "$http_x_forwarded_for"';
+access_log /data/logs/proxy-host-1_access.log proxy;
+EOF
+    fi
   fi
 
   # Generate dummy SSL certificate if needed

@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Feature ideas for future releases
 
+## [3.1.3] - 2026-01-31
+
+### Fixed
+- Ensure `/etc/nginx/conf.d/include/log.conf` exists after deploy to prevent OpenResty startup failures
+
 ## [3.1.2] - 2026-01-31
 
 ### Changed
@@ -70,7 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Safer-by-default behavior to avoid destructive nginx/apache overwrites without explicit consent
 
 
-[Unreleased]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.1.2...HEAD
+[Unreleased]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.1.3...HEAD
+[3.1.3]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.1.2...v3.1.3
 [3.1.2]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.1.1...v3.1.2
 [3.1.1]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/BrunoAFK/proxmox-helper-nginx-manager/compare/v3.0.0...v3.1.0
