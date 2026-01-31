@@ -18,7 +18,7 @@ REPO="NginxProxyManager/nginx-proxy-manager"
 # ============================================================================
 
 # Version settings
-NPM_VERSION_DEFAULT="2.13.5"      # Set to "latest" for auto-detection
+NPM_VERSION_DEFAULT="latest"      # Set to "latest" for auto-detection
 NODE_MAJOR_DEFAULT="22"            # Node.js major version
 YARN_VERSION_DEFAULT="1.22.22"    # Yarn classic version
 
